@@ -1,0 +1,24 @@
+[Unit]
+Description=SLYD R2 File Watcher and Downloader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/slyd-r2-watcher.sh
+Restart=always
+RestartSec=10
+User=root
+StandardOutput=append:/var/log/slyd-r2-watcher.log
+StandardError=append:/var/log/slyd-r2-watcher.log
+
+# Security settings
+NoNewPrivileges=false
+PrivateTmp=false
+
+# Resource limits (keep it lightweight)
+MemoryLimit=100M
+CPUQuota=5%
+
+[Install]
+WantedBy=multi-user.target
