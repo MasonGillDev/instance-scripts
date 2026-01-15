@@ -10,7 +10,7 @@
 set -e
 
 # Configuration
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 WATCH_DIR="/tmp/slyd-downloads"
 DOWNLOAD_DIR="/home/ubuntu/downloads"
 LOG_FILE="/var/log/slyd-r2-watcher.log"
