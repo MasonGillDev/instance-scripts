@@ -10,7 +10,7 @@
 set -e
 
 # Configuration
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.0.4"
 WATCH_DIR="/tmp/slyd-downloads"
 DOWNLOAD_DIR="/home/ubuntu/downloads"
 LOG_FILE="/var/log/slyd-r2-watcher.log"
@@ -174,22 +174,40 @@ process_download_job() {
                 sudo pip3 install cryptography 2>/dev/null
             fi
 
-            # Decrypt using Python (handles GCM properly)
-            if python3 -c "
+            # Decrypt using Python
+            # Note: GCM requires entire ciphertext for authentication, cannot stream
+            python3 -c "
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import sys
 
-key = open('$decrypted_key_file', 'rb').read()
-iv = open('$iv_file', 'rb').read()
-tag = open('$tag_file', 'rb').read()
-ciphertext = open('$encrypted_data_file', 'rb').read()
+try:
+    # Read key, IV, and tag
+    with open('$decrypted_key_file', 'rb') as f:
+        key = f.read()
+    with open('$iv_file', 'rb') as f:
+        iv = f.read()
+    with open('$tag_file', 'rb') as f:
+        tag = f.read()
 
-# GCM expects ciphertext + tag concatenated
-aesgcm = AESGCM(key)
-plaintext = aesgcm.decrypt(iv, ciphertext + tag, None)
+    # Read ciphertext
+    with open('$encrypted_data_file', 'rb') as f:
+        ciphertext = f.read()
 
-open('$decrypted_file', 'wb').write(plaintext)
-" 2>/dev/null; then
+    # Decrypt
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(iv, ciphertext + tag, None)
+
+    # Write output
+    with open('$decrypted_file', 'wb') as f:
+        f.write(plaintext)
+
+    sys.exit(0)
+except Exception as e:
+    print(f'Decryption error: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1
+
+            if [ $? -eq 0 ]; then
                 log "File decryption successful"
                 rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$tag_file" "$encrypted_data_file"
                 temp_file="$decrypted_file"
