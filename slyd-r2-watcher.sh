@@ -118,15 +118,60 @@ process_download_job() {
                 sudo apt-get update -qq && sudo apt-get install -y openssl
             fi
 
-            # Decrypt using AES-256-CBC
-            local decrypted_file="${temp_file}.decrypted"
-            if echo "$encryption_key" | openssl enc -d -aes-256-cbc -pbkdf2 -in "$temp_file" -out "$decrypted_file" -pass stdin 2>/dev/null; then
-                log "Decryption successful"
+            # Path to instance private key (generated during bootstrap)
+            local private_key_path="/root/.slyd/instance-private.key"
+
+            if [ ! -f "$private_key_path" ]; then
+                log "ERROR: Private key not found at $private_key_path"
                 rm -f "$temp_file"
+                mv "$job_file" "${job_file}.failed"
+                return 1
+            fi
+
+            # Step 1: Decrypt the RSA-encrypted AES key with instance private key
+            log "Decrypting AES key with RSA private key..."
+            local encrypted_key_file="/tmp/encrypted_key_$$.bin"
+            local decrypted_key_file="/tmp/decrypted_key_$$.bin"
+
+            # Decode base64 encrypted key to binary
+            echo "$encryption_key" | base64 -d > "$encrypted_key_file"
+
+            # Decrypt AES key using RSA-OAEP with SHA-256
+            if ! openssl pkeyutl -decrypt -inkey "$private_key_path" \
+                -in "$encrypted_key_file" -out "$decrypted_key_file" \
+                -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null; then
+                log "ERROR: Failed to decrypt AES key with RSA private key"
+                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file"
+                mv "$job_file" "${job_file}.failed"
+                return 1
+            fi
+
+            log "AES key decrypted successfully"
+
+            # Step 2: Extract IV and encrypted data from downloaded file
+            # File format: [12 bytes IV][encrypted data]
+            local iv_file="/tmp/iv_$$.bin"
+            local encrypted_data_file="/tmp/encrypted_data_$$.bin"
+            local decrypted_file="${temp_file}.decrypted"
+
+            # Extract first 12 bytes as IV
+            dd if="$temp_file" of="$iv_file" bs=12 count=1 2>/dev/null
+
+            # Extract remaining bytes as encrypted data
+            dd if="$temp_file" of="$encrypted_data_file" bs=12 skip=1 2>/dev/null
+
+            # Step 3: Decrypt file with AES-256-GCM
+            log "Decrypting file with AES-256-GCM..."
+            if openssl enc -d -aes-256-gcm \
+                -K "$(xxd -p -c 256 < "$decrypted_key_file")" \
+                -iv "$(xxd -p -c 256 < "$iv_file")" \
+                -in "$encrypted_data_file" -out "$decrypted_file" 2>/dev/null; then
+                log "File decryption successful"
+                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$encrypted_data_file"
                 temp_file="$decrypted_file"
             else
-                log "ERROR: Decryption failed"
-                rm -f "$temp_file" "$decrypted_file"
+                log "ERROR: File decryption failed"
+                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$encrypted_data_file" "$decrypted_file"
                 mv "$job_file" "${job_file}.failed"
                 return 1
             fi
