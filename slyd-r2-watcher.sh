@@ -10,7 +10,7 @@
 set -e
 
 # Configuration
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 WATCH_DIR="/tmp/slyd-downloads"
 DOWNLOAD_DIR="/home/ubuntu/downloads"
 LOG_FILE="/var/log/slyd-r2-watcher.log"
@@ -164,20 +164,32 @@ process_download_job() {
             # Extract remaining bytes as encrypted data
             dd if="$temp_file" of="$encrypted_data_file" skip=28 iflag=skip_bytes 2>/dev/null
 
-            # Step 3: Decrypt file with AES-256-GCM
+            # Step 3: Decrypt file with AES-256-GCM using Python cryptography
             log "Decrypting file with AES-256-GCM..."
 
-            # Convert to hex for OpenSSL
-            local key_hex=$(xxd -p -c 256 < "$decrypted_key_file")
-            local iv_hex=$(xxd -p -c 256 < "$iv_file")
-            local tag_hex=$(xxd -p -c 256 < "$tag_file")
+            # Install cryptography library if needed
+            if ! python3 -c "import cryptography" 2>/dev/null; then
+                log "Installing Python cryptography library..."
+                sudo apt-get update -qq && sudo apt-get install -y python3-pip 2>/dev/null
+                sudo pip3 install cryptography 2>/dev/null
+            fi
 
-            # Decrypt using openssl with auth tag
-            if openssl enc -d -aes-256-gcm \
-                -K "$key_hex" \
-                -iv "$iv_hex" \
-                -in "$encrypted_data_file" \
-                -out "$decrypted_file" 2>/dev/null; then
+            # Decrypt using Python (handles GCM properly)
+            if python3 -c "
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import sys
+
+key = open('$decrypted_key_file', 'rb').read()
+iv = open('$iv_file', 'rb').read()
+tag = open('$tag_file', 'rb').read()
+ciphertext = open('$encrypted_data_file', 'rb').read()
+
+# GCM expects ciphertext + tag concatenated
+aesgcm = AESGCM(key)
+plaintext = aesgcm.decrypt(iv, ciphertext + tag, None)
+
+open('$decrypted_file', 'wb').write(plaintext)
+" 2>/dev/null; then
                 log "File decryption successful"
                 rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$tag_file" "$encrypted_data_file"
                 temp_file="$decrypted_file"
