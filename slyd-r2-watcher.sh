@@ -148,30 +148,42 @@ process_download_job() {
 
             log "AES key decrypted successfully"
 
-            # Step 2: Extract IV and encrypted data from downloaded file
-            # File format: [12 bytes IV][encrypted data]
+            # Step 2: Extract IV, auth tag, and encrypted data from downloaded file
+            # File format: [12 bytes IV][16 bytes Auth Tag][Encrypted Data]
             local iv_file="/tmp/iv_$$.bin"
-            local encrypted_data_file="/tmp/encrypted_data_$$.bin"
+            local tag_file="/tmp/tag_$$.bin"
+            local encrypted_data_file="/tmp/encrypted_$$.bin"
             local decrypted_file="${temp_file}.decrypted"
 
             # Extract first 12 bytes as IV
             dd if="$temp_file" of="$iv_file" bs=12 count=1 2>/dev/null
 
+            # Extract next 16 bytes as auth tag
+            dd if="$temp_file" of="$tag_file" bs=16 count=1 skip=12 iflag=skip_bytes 2>/dev/null
+
             # Extract remaining bytes as encrypted data
-            dd if="$temp_file" of="$encrypted_data_file" bs=12 skip=1 2>/dev/null
+            dd if="$temp_file" of="$encrypted_data_file" skip=28 iflag=skip_bytes 2>/dev/null
 
             # Step 3: Decrypt file with AES-256-GCM
             log "Decrypting file with AES-256-GCM..."
+
+            # Convert to hex for OpenSSL
+            local key_hex=$(xxd -p -c 256 < "$decrypted_key_file")
+            local iv_hex=$(xxd -p -c 256 < "$iv_file")
+            local tag_hex=$(xxd -p -c 256 < "$tag_file")
+
+            # Decrypt using openssl with auth tag
             if openssl enc -d -aes-256-gcm \
-                -K "$(xxd -p -c 256 < "$decrypted_key_file")" \
-                -iv "$(xxd -p -c 256 < "$iv_file")" \
-                -in "$encrypted_data_file" -out "$decrypted_file" 2>/dev/null; then
+                -K "$key_hex" \
+                -iv "$iv_hex" \
+                -in "$encrypted_data_file" \
+                -out "$decrypted_file" 2>/dev/null; then
                 log "File decryption successful"
-                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$encrypted_data_file"
+                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$tag_file" "$encrypted_data_file"
                 temp_file="$decrypted_file"
             else
                 log "ERROR: File decryption failed"
-                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$encrypted_data_file" "$decrypted_file"
+                rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$tag_file" "$encrypted_data_file" "$decrypted_file"
                 mv "$job_file" "${job_file}.failed"
                 return 1
             fi
