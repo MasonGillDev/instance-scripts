@@ -10,7 +10,7 @@
 set -e
 
 # Configuration
-SCRIPT_VERSION="1.0.4"
+SCRIPT_VERSION="1.0.5"
 WATCH_DIR="/tmp/slyd-downloads"
 DOWNLOAD_DIR="/home/ubuntu/downloads"
 LOG_FILE="/var/log/slyd-r2-watcher.log"
@@ -176,11 +176,13 @@ process_download_job() {
 
             # Decrypt using Python
             # Note: GCM requires entire ciphertext for authentication, cannot stream
-            python3 -c "
+            local decrypt_output=$(python3 -u -c "
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import sys
+import os
 
 try:
+    print('Reading key, IV, and tag...', file=sys.stderr, flush=True)
     # Read key, IV, and tag
     with open('$decrypted_key_file', 'rb') as f:
         key = f.read()
@@ -189,25 +191,32 @@ try:
     with open('$tag_file', 'rb') as f:
         tag = f.read()
 
+    print(f'Reading ciphertext ({os.path.getsize(\"$encrypted_data_file\")} bytes)...', file=sys.stderr, flush=True)
     # Read ciphertext
     with open('$encrypted_data_file', 'rb') as f:
         ciphertext = f.read()
 
+    print('Decrypting...', file=sys.stderr, flush=True)
     # Decrypt
     aesgcm = AESGCM(key)
     plaintext = aesgcm.decrypt(iv, ciphertext + tag, None)
 
+    print('Writing decrypted file...', file=sys.stderr, flush=True)
     # Write output
     with open('$decrypted_file', 'wb') as f:
         f.write(plaintext)
 
+    print('Success', file=sys.stderr, flush=True)
     sys.exit(0)
 except Exception as e:
-    print(f'Decryption error: {e}', file=sys.stderr)
+    print(f'Decryption error: {e}', file=sys.stderr, flush=True)
     sys.exit(1)
-" 2>&1
+" 2>&1)
+            local decrypt_exit_code=$?
 
-            if [ $? -eq 0 ]; then
+            log "$decrypt_output"
+
+            if [ $decrypt_exit_code -eq 0 ]; then
                 log "File decryption successful"
                 rm -f "$temp_file" "$encrypted_key_file" "$decrypted_key_file" "$iv_file" "$tag_file" "$encrypted_data_file"
                 temp_file="$decrypted_file"
