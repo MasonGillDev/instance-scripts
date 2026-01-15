@@ -14,7 +14,7 @@ SCRIPT_VERSION="1.0.1"
 WATCH_DIR="/tmp/slyd-downloads"
 DOWNLOAD_DIR="/home/ubuntu/downloads"
 LOG_FILE="/var/log/slyd-r2-watcher.log"
-GITHUB_RAW_BASE="https://raw.githubusercontent.com/SLYD-Platform/instance-scripts/main"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/MasonGillDev/instance-scripts/main"
 CHECK_INTERVAL=5  # seconds between checks
 UPDATE_CHECK_INTERVAL=3600  # Check for updates every hour
 
